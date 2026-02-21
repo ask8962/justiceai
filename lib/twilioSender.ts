@@ -8,7 +8,7 @@ const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || ''; // e.g., 'whatsapp:
 const client = twilio(accountSid, authToken);
 
 /**
- * Sends a WhatsApp message using the Twilio SDK.
+ * Sends a WhatsApp text message using the Twilio SDK.
  * @param to The recipient's phone number in WhatsApp format (e.g., 'whatsapp:+919876543210')
  * @param body The message text to send
  */
@@ -31,3 +31,31 @@ export async function sendWhatsAppMessage(to: string, body: string) {
         throw error;
     }
 }
+
+/**
+ * Sends a WhatsApp audio message using the Twilio SDK.
+ * @param to The recipient's phone number in WhatsApp format
+ * @param body The caption text alongside the audio
+ * @param mediaUrl A publicly accessible URL for the audio file
+ */
+export async function sendWhatsAppAudio(to: string, body: string, mediaUrl: string) {
+    if (!accountSid || !authToken || !fromNumber) {
+        console.error('[twilioSender] Missing Twilio credentials in environment variables.');
+        return;
+    }
+
+    try {
+        const message = await client.messages.create({
+            body,
+            from: fromNumber,
+            to,
+            mediaUrl: [mediaUrl],
+        });
+        console.log(`[twilioSender] Audio message sent to ${to}. SID: ${message.sid}`);
+        return message.sid;
+    } catch (error) {
+        console.error(`[twilioSender] Failed to send audio to ${to}:`, error);
+        throw error;
+    }
+}
+

@@ -1,7 +1,8 @@
 import { getFirebaseAdminDb } from './firebase-admin';
-import { sendWhatsAppMessage } from './twilioSender';
+import { sendWhatsAppMessage, sendWhatsAppAudio } from './twilioSender';
 import { generateLegalDraft } from './generateDraft';
-import { speechToTextFromUrl, translateText } from './sarvam';
+import { speechToTextFromUrl, translateText, textToSpeech } from './sarvam';
+import crypto from 'crypto';
 
 interface Session {
     step: 'start' | 'choose_language' | 'choose_issue' | 'company_name' | 'amount' | 'order_date' | 'confirm' | 'completed';
@@ -66,6 +67,7 @@ export async function handleWhatsAppFlow(
     }
 
     let userInput = incomingBody.trim();
+    let isVoiceNote = false; // Track if user sent audio, so we can reply with audio too
 
     // -- VOICE NOTE SUPPORT --
     // If the user sent a voice note, transcribe it first
@@ -81,6 +83,7 @@ export async function handleWhatsAppFlow(
                 return;
             }
             userInput = transcript;
+            isVoiceNote = true; // Mark this so we send an audio reply
         } catch (sttError) {
             console.error('[flowController] STT Error:', sttError);
             await sendWhatsAppMessage(phone, await toUserLang("Sorry, I had trouble processing your voice note. Please type your message instead.", session.language));
@@ -182,9 +185,37 @@ export async function handleWhatsAppFlow(
         // Save session state
         await sessionRef.set(session);
 
-        // Send reply back via Twilio
+        // Send reply back via Twilio (with optional audio if user sent a voice note)
         if (replyText) {
             await sendWhatsAppMessage(phone, replyText);
+
+            // If user sent a voice note, also reply with an audio message
+            if (isVoiceNote && replyText.length <= 500) {
+                try {
+                    const ttsLang = session.language || 'en-IN';
+                    console.log(`[flowController] Generating TTS audio in ${ttsLang}...`);
+                    const base64Audio = await textToSpeech(replyText, ttsLang);
+
+                    // Store audio in Firestore temporarily
+                    const audioId = crypto.randomUUID();
+                    await db.collection('tts_audio_cache').doc(audioId).set({
+                        audio: base64Audio,
+                        createdAt: Date.now(),
+                    });
+
+                    // Build the public URL for Twilio to fetch
+                    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
+                        ? `https://${process.env.VERCEL_URL}`
+                        : 'http://localhost:3000';
+                    const audioUrl = `${baseUrl}/api/v1/tts-audio/${audioId}`;
+
+                    console.log(`[flowController] Sending audio reply: ${audioUrl}`);
+                    await sendWhatsAppAudio(phone, '🔊 Voice Reply', audioUrl);
+                } catch (ttsError) {
+                    console.error('[flowController] TTS/Audio Reply Error:', ttsError);
+                    // Non-fatal: text was already sent, audio is a bonus
+                }
+            }
         }
     } catch (error) {
         console.error('[flowController] Error in state machine:', error);
