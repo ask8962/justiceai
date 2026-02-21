@@ -41,10 +41,4 @@ async function handler(req: NextRequest) {
 }
 
 // Wrap the handler with QStash signature verification
-// During Vercel build time (npm run build), env vars might be missing which causes QStash to crash.
-// We bypass the wrapper during build time by checking if the keys exist.
-const requireSignature = process.env.QSTASH_CURRENT_SIGNING_KEY && process.env.QSTASH_NEXT_SIGNING_KEY;
-
-export const POST = requireSignature
-    ? verifySignatureAppRouter(handler)
-    : handler;
+export const POST = verifySignatureAppRouter(handler);

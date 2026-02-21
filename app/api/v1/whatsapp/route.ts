@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateRequest } from 'twilio/lib/webhooks/webhooks';
 import { qstashClient } from '@/lib/upstash';
+import { handleWhatsAppFlow } from '@/lib/flowController';
 
 export async function POST(req: NextRequest) {
     try {
@@ -24,28 +25,43 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // Parse form data from the text body to ensure it has 'From'
+        // Parse form data from the text body
         const formData = new URLSearchParams(bodyText);
         const from = formData.get('From');
+        const body = formData.get('Body') || '';
+        const numMedia = parseInt(formData.get('NumMedia') || '0', 10);
+        const mediaUrl0 = formData.get('MediaUrl0') || '';
 
         if (!from) {
             return new NextResponse('Bad Request - Missing From', { status: 400 });
         }
 
-        // Publish to Upstash QStash for Background Processing
-        // The worker runs at /api/v1/whatsapp/worker
-        const workerUrl = `${url.origin}/api/v1/whatsapp/worker`;
+        // QStash CANNOT reach localhost (loopback). So:
+        // - LOCAL DEV (ngrok): Process directly (like before)
+        // - PRODUCTION (Vercel): Publish to QStash for background processing
+        const isLocalDev = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
 
-        try {
-            const messageId = await qstashClient.publishJSON({
-                url: workerUrl,
-                body: { rawTwilioBody: bodyText },
-                retries: 3, // Retry up to 3 times if the worker fails
-            });
-            console.log(`[WhatsApp API] Published to QStash Worker. MessageID: ${messageId}`);
-        } catch (qstashError) {
-            console.error('[WhatsApp API] Failed to publish to QStash:', qstashError);
-            // Even if QStash fails, we must return 200 OK to Twilio so it stops retrying
+        if (isLocalDev) {
+            // Direct execution for local testing
+            console.log('[WhatsApp API] Local dev mode - processing directly');
+            try {
+                await handleWhatsAppFlow(from, body, { numMedia, mediaUrl0 });
+            } catch (error) {
+                console.error('[WhatsApp API] Flow controller error:', error);
+            }
+        } else {
+            // Production: Publish to Upstash QStash for background processing
+            const workerUrl = `${url.origin}/api/v1/whatsapp/worker`;
+            try {
+                const messageId = await qstashClient.publishJSON({
+                    url: workerUrl,
+                    body: { rawTwilioBody: bodyText },
+                    retries: 3,
+                });
+                console.log(`[WhatsApp API] Published to QStash Worker. MessageID: ${messageId}`);
+            } catch (qstashError) {
+                console.error('[WhatsApp API] Failed to publish to QStash:', qstashError);
+            }
         }
 
         // Always return 200 OK with empty TwiML response for Twilio
@@ -59,3 +75,4 @@ export async function POST(req: NextRequest) {
         return new NextResponse('Internal Server Error', { status: 500 });
     }
 }
+

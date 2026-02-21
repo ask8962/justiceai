@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { Mic, MicOff, Send, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { transcribeAudioAction } from '@/app/actions/voice';
+import { speechToText } from '@/lib/sarvam';
 
 interface VoiceInputProps {
   onTranscript: (text: string) => void;
@@ -46,9 +46,7 @@ export function VoiceInput({ onTranscript, disabled, language = 'en-US' }: Voice
 
         setIsProcessing(true);
         try {
-          const formData = new FormData();
-          formData.append('audio', audioBlob);
-          const text = await transcribeAudioAction(formData);
+          const text = await speechToText(audioBlob);
           setTranscript(text);
         } catch (error) {
           console.error('Sarvam STT error:', error);

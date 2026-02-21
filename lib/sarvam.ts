@@ -149,10 +149,40 @@ export async function translateText(
 }
 
 /**
- * Helper: Play base64 audio
+ * Helper: Play base64 audio (client-side only)
  */
 export function playBase64Audio(base64Audio: string): HTMLAudioElement {
     const audio = new Audio(`data:audio/wav;base64,${base64Audio}`);
     audio.play();
     return audio;
+}
+
+/**
+ * Speech-to-Text using Sarvam Saaras (Browser Blob version)
+ * Used by the client-side voice-input component.
+ * Accepts an audio Blob (WAV/webm) and returns the transcript.
+ */
+export async function speechToText(audioBlob: Blob): Promise<string> {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'recording.wav');
+    formData.append('model', 'saaras:v1');
+    formData.append('language_code', 'unknown');
+    formData.append('with_timestamps', 'false');
+
+    const response = await fetch(`${SARVAM_BASE_URL}/speech-to-text`, {
+        method: 'POST',
+        headers: {
+            'api-subscription-key': SARVAM_API_KEY,
+        },
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const errorData = await response.text();
+        console.error('Sarvam STT Error:', errorData);
+        throw new Error(`Sarvam STT failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.transcript || '';
 }
