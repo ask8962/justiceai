@@ -4,16 +4,46 @@ import { generateLegalDraft } from './generateDraft';
 import { speechToTextFromUrl, translateText } from './sarvam';
 
 interface Session {
-    step: 'start' | 'choose_issue' | 'company_name' | 'amount' | 'order_date' | 'confirm' | 'completed';
+    step: 'start' | 'choose_language' | 'choose_issue' | 'company_name' | 'amount' | 'order_date' | 'confirm' | 'completed';
     data: {
         issueType?: string;
         company?: string;
         amount?: string;
         orderDate?: string;
     };
-    language?: string; // Tracks 'hi-IN' or 'en-IN'
+    language?: string; // 'hi-IN' or 'en-IN' — set by user choice
     generatedAt?: number;
     outcomeAsked: boolean;
+}
+
+/**
+ * Helper: Translate text to the user's chosen language (only if Hindi).
+ * If user chose English, returns the original text.
+ */
+async function toUserLang(text: string, language?: string): Promise<string> {
+    if (language === 'hi-IN') {
+        try {
+            return await translateText(text, 'en-IN', 'hi-IN');
+        } catch {
+            return text; // Fallback to English if translation fails
+        }
+    }
+    return text;
+}
+
+/**
+ * Helper: Translate user's input to English (only if they chose Hindi).
+ * If user chose English, returns input as-is.
+ */
+async function toEnglish(text: string, language?: string): Promise<string> {
+    if (language === 'hi-IN') {
+        try {
+            return await translateText(text, 'hi-IN', 'en-IN');
+        } catch {
+            return text;
+        }
+    }
+    return text;
 }
 
 /**
@@ -37,107 +67,87 @@ export async function handleWhatsAppFlow(
 
     let userInput = incomingBody.trim();
 
-    // -- PHASE 2: VOICE NOTE SUPPORT --
+    // -- VOICE NOTE SUPPORT --
     // If the user sent a voice note, transcribe it first
     if (media && media.numMedia > 0 && media.mediaUrl0) {
         await sendWhatsAppMessage(phone, "🎧 _Listening to your voice note..._");
         try {
-            console.log(`[WhatsApp API] Downloading and transcribing audio from ${media.mediaUrl0}`);
-            // speechToTextFromUrl downloads from Twilio and uses Sarvam saaras:v1 to return English text
+            console.log(`[flowController] Downloading and transcribing audio from ${media.mediaUrl0}`);
             const transcript = await speechToTextFromUrl(media.mediaUrl0);
-            console.log(`[WhatsApp API] Transcription Result: "${transcript}"`);
+            console.log(`[flowController] Transcription Result: "${transcript}"`);
 
             if (!transcript) {
-                await sendWhatsAppMessage(phone, "Sorry, I couldn't understand that audio. Could you please type it out?");
+                await sendWhatsAppMessage(phone, await toUserLang("Sorry, I couldn't understand that audio. Could you please type it out?", session.language));
                 return;
             }
             userInput = transcript;
         } catch (sttError) {
-            console.error('[WhatsApp API] STT Error:', sttError);
-            await sendWhatsAppMessage(phone, "Sorry, I had trouble processing your voice note. Please type your message instead.");
+            console.error('[flowController] STT Error:', sttError);
+            await sendWhatsAppMessage(phone, await toUserLang("Sorry, I had trouble processing your voice note. Please type your message instead.", session.language));
             return;
         }
     }
 
-    // -- PHASE 2: AUTO TRANSLATION (VERNACULAR SUPPORT) --
-    // We attempt to translate ANY incoming text to English.
-    // The translation model auto-detects the source language.
-    // If it's already English, it returns English. If Hindi, it translates to English.
-    let englishInput = userInput;
-    if (userInput && userInput.length > 0) {
-        try {
-            console.log(`[WhatsApp API] Translating input: "${userInput}"`);
-            // We ask Sarvam to translate to English.
-            // Note: We'll assume the user is speaking Hindi if the transcription or text looks non-standard,
-            // but for a robust system, language detection should happen first.
-            // Sarvam requires source_language, so we will attempt hi-IN to en-IN.
-            // If the user spoke English, Sarvam might fail or return it as-is.
-            englishInput = await translateText(userInput, 'hi-IN', 'en-IN');
-            console.log(`[WhatsApp API] Translated Input (en): "${englishInput}"`);
-
-            // If the translation actually changed the text significantly, we assume the user prefers Hindi.
-            if (englishInput.toLowerCase().trim() !== userInput.toLowerCase().trim()) {
-                session.language = 'hi-IN';
-            }
-        } catch (translateError) {
-            console.error('[WhatsApp API] Translation Error:', translateError);
-            // Fallback to original input if translation fails
-        }
+    // If user says "restart" or "hi", reset the flow
+    if (userInput.toLowerCase() === 'restart' || userInput.toLowerCase() === 'hi' || userInput.toLowerCase() === 'hello') {
+        session = { step: 'start', data: {}, outcomeAsked: false };
     }
+
+    // Translate input to English ONLY if the user has already chosen Hindi
+    const englishInput = await toEnglish(userInput, session.language);
 
     let replyText = '';
-
-    // If user says "restart" or "hi" initially, reset the flow
-    if (englishInput.toLowerCase() === 'restart' || englishInput.toLowerCase() === 'hi' || englishInput.toLowerCase() === 'hello') {
-        session = { step: 'start', data: {}, outcomeAsked: false, language: session.language }; // Preserve language preference on restart
-    }
 
     try {
         switch (session.step) {
             case 'start':
-                replyText = `Welcome to JusticeAI's Consumer Scam Helpdesk. 👋\n\nI can help you officially complain against e-commerce fraud and draft a legal notice.\n\nType *start* to begin.`;
-                session.step = 'choose_issue';
+                replyText = `Welcome to *JusticeAI's Consumer Scam Helpdesk* 👋\n\nI can help you officially complain against e-commerce fraud and draft a legal notice.\n\n*Choose your language / अपनी भाषा चुनें:*\n\n1️⃣ English\n2️⃣ हिन्दी (Hindi)`;
+                session.step = 'choose_language';
                 break;
 
-            case 'choose_issue':
-                replyText = `Please describe the issue in one short sentence (e.g., "Received fake product", "Refund not processed").`;
-                session.step = 'company_name';
+            case 'choose_language':
+                if (userInput === '1' || userInput.toLowerCase() === 'english') {
+                    session.language = 'en-IN';
+                    replyText = `Great! You've selected *English*. 🇬🇧\n\nPlease describe the issue in one short sentence (e.g., "Received fake product", "Refund not processed").`;
+                    session.step = 'company_name';
+                } else if (userInput === '2' || userInput.toLowerCase().includes('hindi') || userInput.toLowerCase().includes('हिन्दी') || userInput.toLowerCase().includes('हिंदी')) {
+                    session.language = 'hi-IN';
+                    replyText = `बहुत बढ़िया! आपने *हिन्दी* चुनी है। 🇮🇳\n\nकृपया अपनी समस्या एक छोटे वाक्य में बताएं (जैसे, "नकली प्रोडक्ट मिला", "रिफंड नहीं मिला")।`;
+                    session.step = 'company_name';
+                } else {
+                    replyText = `Please type *1* for English or *2* for हिन्दी (Hindi).`;
+                }
                 break;
 
             case 'company_name':
                 session.data.issueType = englishInput;
-                replyText = `Got it. What is the exact name of the company or website (e.g., Amazon, Flipkart, XYZ Fashion)?`;
+                replyText = await toUserLang(`Got it. What is the exact name of the company or website? (e.g., Amazon, Flipkart, XYZ Fashion)`, session.language);
                 session.step = 'amount';
                 break;
 
             case 'amount':
                 session.data.company = englishInput;
-                replyText = `What is the disputed amount in Rupees? (e.g., 2500)`;
+                replyText = await toUserLang(`What is the disputed amount in Rupees? (e.g., 2500)`, session.language);
                 session.step = 'order_date';
                 break;
 
             case 'order_date':
                 session.data.amount = englishInput;
-                replyText = `When did this happen? Provide the date of the order/incident (e.g., 12 Oct 2025).`;
+                replyText = await toUserLang(`When did this happen? Provide the date of the order/incident (e.g., 12 Oct 2025).`, session.language);
                 session.step = 'confirm';
                 break;
 
             case 'confirm':
                 session.data.orderDate = englishInput;
-                replyText = `Please review your details:\n\n*Company:* ${session.data.company}\n*Amount:* Rs ${session.data.amount}\n*Date:* ${session.data.orderDate}\n*Issue:* ${session.data.issueType}\n\nType *YES* to generate a legal notice, or *RESTART* to start over.`;
-                session.step = 'completed'; // Move to complete state to process the YES
+                const confirmMsg = `Please review your details:\n\n*Company:* ${session.data.company}\n*Amount:* Rs ${session.data.amount}\n*Date:* ${session.data.orderDate}\n*Issue:* ${session.data.issueType}\n\nType *YES* to generate a legal notice, or *RESTART* to start over.`;
+                replyText = await toUserLang(confirmMsg, session.language);
+                session.step = 'completed';
                 break;
 
             case 'completed':
-                if (englishInput.toLowerCase() === 'yes') {
-                    // Send loading message (translate if needed)
-                    let loadingMsg = "⏳ Generating your legal notice using Indian Consumer Law. This will take ~10 seconds...";
-                    if (session.language === 'hi-IN') {
-                        try {
-                            loadingMsg = await translateText(loadingMsg, 'en-IN', 'hi-IN');
-                        } catch (e) { }
-                    }
-                    await sendWhatsAppMessage(phone, loadingMsg);
+                if (englishInput.toLowerCase() === 'yes' || userInput.toLowerCase() === 'haan' || userInput.toLowerCase() === 'हां') {
+                    // Send loading message
+                    await sendWhatsAppMessage(phone, await toUserLang("⏳ Generating your legal notice using Indian Consumer Law. This will take ~10 seconds...", session.language));
 
                     const draftResult = await generateLegalDraft({
                         company: session.data.company!,
@@ -147,18 +157,19 @@ export async function handleWhatsAppFlow(
                     });
 
                     if (!draftResult) {
-                        replyText = `⚠️ INSUFFICIENT LEGAL DATA. We couldn't safely draft a notice for this specific issue. Please consult a human lawyer.`;
+                        replyText = await toUserLang(`⚠️ INSUFFICIENT LEGAL DATA. We couldn't safely draft a notice for this specific issue. Please consult a human lawyer.`, session.language);
                     } else {
+                        // Legal draft stays in English for accuracy
                         replyText = `*LEGAL BASIS:*\n${draftResult.citations}\n\n*Risk Level:* ${draftResult.risk_level}\n*Human Review:* Pending 👨‍⚖️\n\n*DRAFT NOTICE:*\n${draftResult.draft_notice}\n\n\n_Tip: Forward this draft to the company's grievance email or print it._`;
                         session.generatedAt = Date.now();
                         session.outcomeAsked = false;
                     }
                 } else if (englishInput.toLowerCase() === 'restart') {
-                    session = { step: 'start', data: {}, outcomeAsked: false, language: session.language };
-                    replyText = `Restarting flow. Type *start* to begin.`;
-                    session.step = 'choose_issue';
+                    session = { step: 'start', data: {}, outcomeAsked: false };
+                    replyText = await toUserLang(`Restarting flow. Type *hi* to begin.`, session.language);
+                    session.step = 'choose_language';
                 } else {
-                    replyText = `Please type *YES* to confirm or *RESTART* to cancel.`;
+                    replyText = await toUserLang(`Please type *YES* to confirm or *RESTART* to cancel.`, session.language);
                 }
                 break;
 
@@ -171,29 +182,13 @@ export async function handleWhatsAppFlow(
         // Save session state
         await sessionRef.set(session);
 
-        // -- PHASE 2: AUTO TRANSLATE OUTGOING RESPONSE --
+        // Send reply back via Twilio
         if (replyText) {
-            let finalOutput = replyText;
-            if (session.language === 'hi-IN') {
-                try {
-                    console.log(`[WhatsApp API] Translating output to Hindi...`);
-                    // We DO NOT translate the generated Draft Notice (it must stay English for legal accuracy),
-                    // but we DO translate the conversational instructions.
-                    if (session.step === 'completed' && englishInput.toLowerCase() === 'yes') {
-                        // The notice was successfully generated. We only translate the metadata.
-                        // For simplicity, we just send it as is in English here to avoid corrupting the legal draft formatting.
-                        finalOutput = replyText;
-                    } else {
-                        finalOutput = await translateText(replyText, 'en-IN', 'hi-IN');
-                    }
-                } catch (tError) {
-                    console.error('[WhatsApp API] Output Translation Error:', tError);
-                }
-            }
-            await sendWhatsAppMessage(phone, finalOutput);
+            await sendWhatsAppMessage(phone, replyText);
         }
     } catch (error) {
         console.error('[flowController] Error in state machine:', error);
         await sendWhatsAppMessage(phone, "Sorry, I encountered an internal error. Please try again later.");
     }
 }
+

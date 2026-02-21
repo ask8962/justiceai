@@ -94,7 +94,7 @@ export async function speechToTextFromUrl(mediaUrl: string): Promise<string> {
     // Wrap the Node Buffer in a Web Blob for the fetch API
     const blob = new Blob([buffer], { type: 'audio/ogg' });
     formData.append('file', blob, 'voicenote.ogg');
-    formData.append('model', 'saaras:v1'); // Ensure we are using Sarvam's available model
+    formData.append('model', 'saaras:v2.5'); // Ensure we are using Sarvam's available model
 
     const response = await fetch(`${SARVAM_BASE_URL}/speech-to-text-translate`, {
         method: 'POST',
@@ -165,7 +165,7 @@ export function playBase64Audio(base64Audio: string): HTMLAudioElement {
 export async function speechToText(audioBlob: Blob): Promise<string> {
     const formData = new FormData();
     formData.append('file', audioBlob, 'recording.wav');
-    formData.append('model', 'saaras:v1');
+    formData.append('model', 'saaras:v2.5');
     formData.append('language_code', 'unknown');
     formData.append('with_timestamps', 'false');
 
