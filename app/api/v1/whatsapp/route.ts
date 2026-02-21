@@ -37,14 +37,14 @@ export async function POST(req: NextRequest) {
             return new NextResponse('Bad Request - Missing From or Body', { status: 400 });
         }
 
-        // Process message asynchronously so Twilio receives a 200 OK immediately
-        handleWhatsAppFlow(from, body).catch((error) => {
+        // Process message synchronously so Vercel does not kill the serverless function prematurely
+        try {
+            await handleWhatsAppFlow(from, body);
+        } catch (error) {
             console.error('[WhatsApp API] Flow controller error:', error);
-        });
+        }
 
-        // Always return 200 OK with empty response for Twilio
-        // We use the REST API (`sendWhatsAppMessage`) to reply, not TwiML responses,
-        // because we might need delays or to fetch AI data.
+        // Always return 200 OK with empty TwiML response for Twilio
         return new NextResponse('<Response></Response>', {
             status: 200,
             headers: { 'Content-Type': 'text/xml' }
