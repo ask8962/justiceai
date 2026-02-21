@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateRequest } from 'twilio';
-import { handleWhatsAppFlow } from '@/lib/flowController';
+import { validateRequest } from 'twilio/lib/webhooks/webhooks';
+import { qstashClient } from '@/lib/upstash';
 
 export async function POST(req: NextRequest) {
     try {
@@ -9,11 +9,9 @@ export async function POST(req: NextRequest) {
         const url = new URL(req.url); // The full URL the webhook was sent to
         const signature = req.headers.get('x-twilio-signature') || '';
 
-        // Optional: Twilio Signature Validation (Recommended for Production)
-        // If TWILIO_AUTH_TOKEN is present, we validate. If testing locally via Ngrok, we might skip if explicitly disabled.
+        // Optional: Twilio Signature Validation
         const authToken = process.env.TWILIO_AUTH_TOKEN;
         if (authToken && process.env.NODE_ENV === 'production') {
-            // Parse application/x-www-form-urlencoded into a standard object containing the post parameters
             const params = new URLSearchParams(bodyText);
             const paramsObject: Record<string, string> = {};
             for (const [key, value] of params.entries()) {
@@ -23,25 +21,31 @@ export async function POST(req: NextRequest) {
             const isValid = validateRequest(authToken, signature, url.toString(), paramsObject);
             if (!isValid) {
                 console.warn(`[WhatsApp API] Invalid Twilio Signature detected. Expected URL: ${url.toString()}`);
-                // Temporary bypass for alpha testing on Vercel to avoid edge URL mismatches
-                // return new NextResponse('Unauthorized', { status: 401 });
             }
         }
 
-        // Parse form data from the text body
+        // Parse form data from the text body to ensure it has 'From'
         const formData = new URLSearchParams(bodyText);
-        const from = formData.get('From'); // e.g. "whatsapp:+1234567890"
-        const body = formData.get('Body');
+        const from = formData.get('From');
 
-        if (!from || !body) {
-            return new NextResponse('Bad Request - Missing From or Body', { status: 400 });
+        if (!from) {
+            return new NextResponse('Bad Request - Missing From', { status: 400 });
         }
 
-        // Process message synchronously so Vercel does not kill the serverless function prematurely
+        // Publish to Upstash QStash for Background Processing
+        // The worker runs at /api/v1/whatsapp/worker
+        const workerUrl = `${url.origin}/api/v1/whatsapp/worker`;
+
         try {
-            await handleWhatsAppFlow(from, body);
-        } catch (error) {
-            console.error('[WhatsApp API] Flow controller error:', error);
+            const messageId = await qstashClient.publishJSON({
+                url: workerUrl,
+                body: { rawTwilioBody: bodyText },
+                retries: 3, // Retry up to 3 times if the worker fails
+            });
+            console.log(`[WhatsApp API] Published to QStash Worker. MessageID: ${messageId}`);
+        } catch (qstashError) {
+            console.error('[WhatsApp API] Failed to publish to QStash:', qstashError);
+            // Even if QStash fails, we must return 200 OK to Twilio so it stops retrying
         }
 
         // Always return 200 OK with empty TwiML response for Twilio

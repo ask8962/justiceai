@@ -1,11 +1,16 @@
-'use client';
+// Sarvam AI API Service (Server Side)
 
 // Sarvam AI API Service
 // Base URL: https://api.sarvam.ai
 // Auth: api-subscription-key header
 
-const SARVAM_API_KEY = process.env.NEXT_PUBLIC_SARVAM_API_KEY || '';
+// Use server-side environment variable to prevent exposing key to client
+const SARVAM_API_KEY = process.env.SARVAM_API_KEY || process.env.NEXT_PUBLIC_SARVAM_API_KEY || '';
 const SARVAM_BASE_URL = 'https://api.sarvam.ai';
+
+// Twilio credentials required to download private voice notes
+const TWILIO_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH = process.env.TWILIO_AUTH_TOKEN;
 
 // Language code mapping for Sarvam API
 export const SARVAM_LANGUAGES: Record<string, string> = {
@@ -63,18 +68,35 @@ export async function textToSpeech(
 }
 
 /**
- * Speech-to-Text using Sarvam Saaras v3
- * Transcribes audio in Indian languages
- * Accepts an audio Blob (WAV/webm) and returns the transcript
+ * Downloads a WhatsApp Voice Note from Twilio and converts it to text using Sarvam Saaras
+ * @param mediaUrl The Twilio media URL (e.g., https://api.twilio.com/...)
  */
-export async function speechToText(audioBlob: Blob): Promise<string> {
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'recording.wav');
-    formData.append('model', 'saaras:v3');
-    formData.append('language_code', 'unknown');
-    formData.append('with_timestamps', 'false');
+export async function speechToTextFromUrl(mediaUrl: string): Promise<string> {
+    if (!SARVAM_API_KEY) throw new Error("Missing Sarvam API Key");
 
-    const response = await fetch(`${SARVAM_BASE_URL}/speech-to-text`, {
+    // 1. Download the audio file from Twilio securely
+    const authHeader = `Basic ${Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64')}`;
+    const mediaResponse = await fetch(mediaUrl, {
+        headers: {
+            'Authorization': authHeader
+        }
+    });
+
+    if (!mediaResponse.ok) {
+        throw new Error(`Failed to download Twilio media: ${mediaResponse.statusText}`);
+    }
+
+    const arrayBuffer = await mediaResponse.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // 2. Send the audio Buffer to Sarvam STT
+    const formData = new FormData();
+    // Wrap the Node Buffer in a Web Blob for the fetch API
+    const blob = new Blob([buffer], { type: 'audio/ogg' });
+    formData.append('file', blob, 'voicenote.ogg');
+    formData.append('model', 'saaras:v1'); // Ensure we are using Sarvam's available model
+
+    const response = await fetch(`${SARVAM_BASE_URL}/speech-to-text-translate`, {
         method: 'POST',
         headers: {
             'api-subscription-key': SARVAM_API_KEY,
@@ -89,6 +111,7 @@ export async function speechToText(audioBlob: Blob): Promise<string> {
     }
 
     const data = await response.json();
+    // Speech-to-text-translate endpoint usually returns the translated English text directly!
     return data.transcript || '';
 }
 
