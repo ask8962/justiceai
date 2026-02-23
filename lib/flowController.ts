@@ -164,8 +164,8 @@ export async function handleWhatsAppFlow(
                         replyText = await toUserLang(`⚠️ INSUFFICIENT LEGAL DATA. We couldn't safely draft a notice for this specific issue. Please consult a human lawyer.`, session.language);
                     } else {
                         // Strip ANSI escape codes from Groq output
-                        const cleanCitations = cleanCitations.replace(/\u001b\[[0-9;]*m/g, '').replace(/\[([0-9;]*)m/g, '');
-                        const cleanRisk = cleanRisk.replace(/\u001b\[[0-9;]*m/g, '').replace(/\[([0-9;]*)m/g, '');
+                        const cleanCitations = draftResult.citations.replace(/\u001b\[[0-9;]*m/g, '').replace(/\[([0-9;]*)m/g, '');
+                        const cleanRisk = draftResult.risk_level.replace(/\u001b\[[0-9;]*m/g, '').replace(/\[([0-9;]*)m/g, '');
 
                         // Generate styled PDF document with metadata
                         const pdfBuffer = await generateLegalPDF(draftResult.draft_notice, {
