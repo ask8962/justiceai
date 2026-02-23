@@ -1,7 +1,8 @@
 import { getFirebaseAdminDb } from './firebase-admin';
-import { sendWhatsAppMessage, sendWhatsAppAudio } from './twilioSender';
+import { sendWhatsAppMessage, sendWhatsAppMedia } from './twilioSender';
 import { generateLegalDraft } from './generateDraft';
 import { speechToTextFromUrl, translateText, textToSpeech } from './sarvam';
+import { generateLegalPDF } from './pdfGenerator';
 import crypto from 'crypto';
 
 interface Session {
@@ -162,8 +163,31 @@ export async function handleWhatsAppFlow(
                     if (!draftResult) {
                         replyText = await toUserLang(`⚠️ INSUFFICIENT LEGAL DATA. We couldn't safely draft a notice for this specific issue. Please consult a human lawyer.`, session.language);
                     } else {
-                        // Legal draft stays in English for accuracy
-                        replyText = `*LEGAL BASIS:*\n${draftResult.citations}\n\n*Risk Level:* ${draftResult.risk_level}\n*Human Review:* Pending 👨‍⚖️\n\n*DRAFT NOTICE:*\n${draftResult.draft_notice}\n\n\n_Tip: Forward this draft to the company's grievance email or print it._`;
+                        // Generate PDF document
+                        const pdfBuffer = await generateLegalPDF(draftResult.draft_notice);
+
+                        // Store PDF in Firestore temporarily
+                        const pdfId = crypto.randomUUID();
+                        await db.collection('pdf_cache').doc(pdfId).set({
+                            pdf: pdfBuffer.toString('base64'),
+                            createdAt: Date.now(),
+                        });
+
+                        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
+                            ? `https://${process.env.VERCEL_URL}`
+                            : 'http://localhost:3000';
+                        const pdfUrl = `${baseUrl}/api/v1/pdf/${pdfId}`;
+
+                        // Keep the WhatsApp text message conversational and short
+                        replyText = await toUserLang(`✅ *Your Legal Notice is Ready!*\n\n*Legal Basis:* ${draftResult.citations}\n*Risk Level:* ${draftResult.risk_level}\n\nI have attached the official PDF document below. You can forward this directly to ${session.data.company}'s grievance officer.`, session.language);
+
+                        // Send the Text + PDF Media immediately
+                        console.log(`[flowController] Sending PDF reply: ${pdfUrl}`);
+                        await sendWhatsAppMedia(phone, replyText, pdfUrl);
+
+                        // Clear replyText so the default sender at the bottom doesn't send it twice
+                        replyText = '';
+
                         session.generatedAt = Date.now();
                         session.outcomeAsked = false;
                     }
@@ -210,7 +234,7 @@ export async function handleWhatsAppFlow(
                     const audioUrl = `${baseUrl}/api/v1/tts-audio/${audioId}`;
 
                     console.log(`[flowController] Sending audio reply: ${audioUrl}`);
-                    await sendWhatsAppAudio(phone, '🔊 Voice Reply', audioUrl);
+                    await sendWhatsAppMedia(phone, '🔊 Voice Reply', audioUrl);
                 } catch (ttsError) {
                     console.error('[flowController] TTS/Audio Reply Error:', ttsError);
                     // Non-fatal: text was already sent, audio is a bonus

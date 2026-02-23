@@ -33,12 +33,12 @@ export async function sendWhatsAppMessage(to: string, body: string) {
 }
 
 /**
- * Sends a WhatsApp audio message using the Twilio SDK.
+ * Sends a WhatsApp media message (Audio, PDF, Image) using the Twilio SDK.
  * @param to The recipient's phone number in WhatsApp format
- * @param body The caption text alongside the audio
- * @param mediaUrl A publicly accessible URL for the audio file
+ * @param body The caption text alongside the media
+ * @param mediaUrl A publicly accessible URL for the media file
  */
-export async function sendWhatsAppAudio(to: string, body: string, mediaUrl: string) {
+export async function sendWhatsAppMedia(to: string, body: string, mediaUrl: string) {
     if (!accountSid || !authToken || !fromNumber) {
         console.error('[twilioSender] Missing Twilio credentials in environment variables.');
         return;
