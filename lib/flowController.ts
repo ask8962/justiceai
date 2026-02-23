@@ -163,8 +163,19 @@ export async function handleWhatsAppFlow(
                     if (!draftResult) {
                         replyText = await toUserLang(`⚠️ INSUFFICIENT LEGAL DATA. We couldn't safely draft a notice for this specific issue. Please consult a human lawyer.`, session.language);
                     } else {
-                        // Generate PDF document
-                        const pdfBuffer = await generateLegalPDF(draftResult.draft_notice);
+                        // Strip ANSI escape codes from Groq output
+                        const cleanCitations = cleanCitations.replace(/\u001b\[[0-9;]*m/g, '').replace(/\[([0-9;]*)m/g, '');
+                        const cleanRisk = cleanRisk.replace(/\u001b\[[0-9;]*m/g, '').replace(/\[([0-9;]*)m/g, '');
+
+                        // Generate styled PDF document with metadata
+                        const pdfBuffer = await generateLegalPDF(draftResult.draft_notice, {
+                            company: session.data.company,
+                            amount: session.data.amount,
+                            orderDate: session.data.orderDate,
+                            issueType: session.data.issueType,
+                            citations: cleanCitations,
+                            riskLevel: cleanRisk,
+                        });
 
                         // Store PDF in Firestore temporarily
                         const pdfId = crypto.randomUUID();
@@ -179,7 +190,7 @@ export async function handleWhatsAppFlow(
                         const pdfUrl = `${baseUrl}/api/v1/pdf/${pdfId}`;
 
                         // Keep the WhatsApp text message conversational and short
-                        replyText = await toUserLang(`✅ *Your Legal Notice is Ready!*\n\n*Legal Basis:* ${draftResult.citations}\n*Risk Level:* ${draftResult.risk_level}\n\nI have attached the official PDF document below. You can forward this directly to ${session.data.company}'s grievance officer.`, session.language);
+                        replyText = await toUserLang(`✅ *Your Legal Notice is Ready!*\n\n*Legal Basis:* ${cleanCitations}\n*Risk Level:* ${cleanRisk}\n\nI have attached the official PDF document. You can forward this directly to ${session.data.company}'s grievance officer.`, session.language);
 
                         // Send the Text + PDF Media immediately
                         console.log(`[flowController] Sending PDF reply: ${pdfUrl}`);
@@ -246,4 +257,5 @@ export async function handleWhatsAppFlow(
         await sendWhatsAppMessage(phone, "Sorry, I encountered an internal error. Please try again later.");
     }
 }
+
 
