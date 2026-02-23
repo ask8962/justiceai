@@ -173,9 +173,9 @@ export async function handleWhatsAppFlow(
                             createdAt: Date.now(),
                         });
 
-                        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
-                            ? `https://${process.env.VERCEL_URL}`
-                            : 'http://localhost:3000';
+                        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL
+                            || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+                            || 'http://localhost:3000';
                         const pdfUrl = `${baseUrl}/api/v1/pdf/${pdfId}`;
 
                         // Keep the WhatsApp text message conversational and short
@@ -228,9 +228,9 @@ export async function handleWhatsAppFlow(
                     });
 
                     // Build the public URL for Twilio to fetch
-                    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
-                        ? `https://${process.env.VERCEL_URL}`
-                        : 'http://localhost:3000';
+                    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL
+                        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null)
+                        || 'http://localhost:3000';
                     const audioUrl = `${baseUrl}/api/v1/tts-audio/${audioId}`;
 
                     console.log(`[flowController] Sending audio reply: ${audioUrl}`);
